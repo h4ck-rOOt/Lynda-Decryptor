@@ -11,10 +11,11 @@ namespace LyndaDecryptor
     [Flags]
     enum Mode
     {
-        None,
-        Single,
-        Folder,
-        DB_Usage
+        None = 1,
+        Single = 2,
+        Folder = 4,
+        DB_Usage = 8,
+        RemoveFiles = 16
     };
 
     class Program
@@ -38,8 +39,6 @@ namespace LyndaDecryptor
         {
             try
             {
-                
-
                 int arg_index = 0;
 
                 foreach (string arg in args)
@@ -57,11 +56,13 @@ namespace LyndaDecryptor
                             {
                                 directory = args[arg_index + 1];
                                 usage_mode = Mode.Folder;
+                                WriteToConsole("[ARGS] Changing mode to Folder decryption!", ConsoleColor.Yellow);
                             }
                             else
                             {
+                                WriteToConsole("[ARGS] The directory path is missing..." + Environment.NewLine, ConsoleColor.Red);
                                 Usage();
-                                return;
+                                goto End;
                             }
                             break;
 
@@ -71,11 +72,14 @@ namespace LyndaDecryptor
                                 file_source = args[arg_index + 1];
                                 file_destination = args[arg_index + 2];
                                 usage_mode = Mode.Single;
+                                WriteToConsole("[ARGS] Changing mode to Single decryption!", ConsoleColor.Yellow);
+
                             }
                             else
                             {
+                                WriteToConsole("[ARGS] Some relevant args are missing..." + Environment.NewLine, ConsoleColor.Red);
                                 Usage();
-                                return;
+                                goto End;
                             }
                             break;
 
@@ -85,12 +89,19 @@ namespace LyndaDecryptor
                             if (args.Length-1 > arg_index && File.Exists(args[arg_index + 1]))
                                 db_path = args[arg_index + 1];
                             break;
+
+                        case "/RM":
+                            usage_mode |= Mode.RemoveFiles;
+                            WriteToConsole("[ARGS] Removing files after decryption..." + Environment.NewLine, ConsoleColor.Yellow);
+                            WriteToConsole("[ARGS] Press any key to continue..." + Environment.NewLine, ConsoleColor.Yellow);
+                            Console.ReadKey();
+                            break;
                     }
 
                     arg_index++;
                 }
 
-                if(usage_mode.HasFlag(Mode.None))
+                if((usage_mode & Mode.None) == Mode.None)
                 {
                     Usage();
                     goto End;
@@ -98,12 +109,12 @@ namespace LyndaDecryptor
                 else
                     InitDecryptor();
 
-                if (usage_mode.HasFlag(Mode.DB_Usage))
+                if ((usage_mode & Mode.DB_Usage) == Mode.DB_Usage)
                     InitDB();
 
-                if (usage_mode.HasFlag(Mode.Folder))
-                    DecryptAll(directory, usage_mode.HasFlag(Mode.DB_Usage));
-                else if (usage_mode.HasFlag(Mode.Single))
+                if ((usage_mode & Mode.Folder) == Mode.Folder)
+                    DecryptAll(directory, (usage_mode & Mode.DB_Usage) == Mode.DB_Usage);
+                else if ((usage_mode & Mode.Single) == Mode.Single)
                     Decrypt(file_source, file_destination);
 
 
@@ -166,14 +177,14 @@ End:
 
         static void Usage()
         {
-            Console.WriteLine("Usage (Directory):   LyndaDecryptor /D PATH_TO_FOLDER");
-            Console.WriteLine("Usage (Single File): LyndaDecryptor /F ENCRYPTED_FILE   DECRYPTED_FILE");
-            Console.WriteLine("Usage (with Database): LyndaDecryptor /D PATH_TO_FOLDER /DB PATH_TO_DATABASE");
+            Console.WriteLine("Usage (Directory):   LyndaDecryptor /D PATH_TO_FOLDER [OPTIONS]");
+            Console.WriteLine("Usage (File): LyndaDecryptor /F ENCRYPTED_FILE   DECRYPTED_FILE [OPTIONS]");
 
             Console.WriteLine(Environment.NewLine + Environment.NewLine + "Flags: ");
             Console.WriteLine("\t/D\tSource files are located in a folder.");
             Console.WriteLine("\t/F\tSource and Destination file are specified.");
             Console.WriteLine("\t/DB\tSearch for Database or specify the location on your system.");
+            Console.WriteLine("\t/RM\tRemoves all files after decryption is complete.");
         }
 
         static async void DecryptAll(string folderPath, bool useDB = false)
@@ -253,7 +264,16 @@ End:
         static void Decrypt(string encryptedFilePath, string decryptedFilePath)
         {
             if (!File.Exists(encryptedFilePath))
-                throw new FileNotFoundException();
+            {
+                WriteToConsole("[ERR] Couldn't find encrypted file...", ConsoleColor.Red);
+                return;
+            }
+
+            if(File.Exists(decryptedFilePath))
+            {
+                WriteToConsole("[DEC] File " + decryptedFilePath + " exists already and will be skipped!", ConsoleColor.Yellow);
+                return;
+            }
 
             FileInfo encryptedFileInfo = new FileInfo(encryptedFilePath);
             byte[] buffer = new byte[0x500000];
@@ -269,7 +289,7 @@ End:
                 using (CryptoStream decryptionStream = new CryptoStream(inStream, decryptor, CryptoStreamMode.Read))
                 using (FileStream outStream = new FileStream(decryptedFilePath, FileMode.Create))
                 {
-                    WriteToConsole("[DEC] Decrypting file" + encryptedFileInfo.Name + "...");
+                    WriteToConsole("[DEC] Decrypting file " + encryptedFileInfo.Name + "...");
 
                     while ((inStream.Length - inStream.Position) >= buffer.Length)
                     {
@@ -285,6 +305,9 @@ End:
                     WriteToConsole("[DEC] File decryption completed: " + decryptedFilePath, ConsoleColor.DarkGreen);
                 }
             }
+
+            if((usage_mode & Mode.RemoveFiles) == Mode.RemoveFiles)
+                encryptedFileInfo.Delete();
         }
 
         static void WriteToConsole(string Text, ConsoleColor color = ConsoleColor.Gray)
