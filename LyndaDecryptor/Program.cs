@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
+using System.Threading;
 
 namespace LyndaDecryptor
 {
@@ -20,6 +21,7 @@ namespace LyndaDecryptor
 
     class Program
     {
+        static List<char> invalidPathChars = new List<char>(), invalidFileChars = new List<char>();
         static char[] partTwo = new char[] { '\'', '*', '\x00b2', '"', 'C', '\x00b4', '|', '\x00a7', '\\' };
         static string ENCRYPTION_KEY = "~h#\x00b0" + new string(partTwo) + "3~.";
         static SQLiteConnection sqlite_db_connection;
@@ -39,6 +41,11 @@ namespace LyndaDecryptor
         {
             try
             {
+                invalidPathChars.AddRange(Path.GetInvalidPathChars());
+                invalidPathChars.AddRange(new char[] { ':', '?', '"', '\\', '/' });
+                invalidFileChars.AddRange(Path.GetInvalidFileNameChars());
+                invalidFileChars.AddRange(new char[] { ':', '?', '"', '\\', '/' });
+
                 int arg_index = 0;
 
                 foreach (string arg in args)
@@ -197,8 +204,10 @@ End:
             foreach(string entry in Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories))
             {
                 var item = entry;
+                var semaphore = new SemaphoreSlim(10);
+                string newPath = "";
 
-                if(useDB)
+                if (useDB)
                 {
                     DirectoryInfo containingDir;
                     DirectoryInfo info = containingDir = new DirectoryInfo(Path.GetDirectoryName(item));
@@ -209,15 +218,15 @@ End:
                     cmd.CommandText = "SELECT Video.ID, Video.ChapterId, Video.CourseId, Video.Title, Filename, Video.CourseTitle, Video.SortIndex, Chapter.Title as ChapterTitle, Chapter.SortIndex as ChapterIndex FROM Video " +
                                       "INNER JOIN Chapter ON Video.ChapterId = Chapter.ID " +
                                       $"WHERE Video.CourseId = {info.Name} AND Video.ID = {videoID}";
-                                      
+
 
                     var reader = cmd.ExecuteReader(System.Data.CommandBehavior.Default);
-                    
-                    if(reader.Read())
+
+                    if (reader.Read())
                     {
                         // Get course name to create a new directory or use this as the working directory
                         var courseTitle = reader.GetString(reader.GetOrdinal("CourseTitle"));
-                        foreach (char invalidChar in Path.GetInvalidPathChars())
+                        foreach (char invalidChar in invalidPathChars)
                             courseTitle = courseTitle.Replace(invalidChar, '-');
 
                         // Use the existing directory or create a new folder with the courseTitle
@@ -228,7 +237,7 @@ End:
 
                         // Create or use another folder to group by the Chapter
                         var chapterTitle = reader.GetString(reader.GetOrdinal("ChapterTitle"));
-                        foreach (char invalidChar in Path.GetInvalidPathChars())
+                        foreach (char invalidChar in invalidPathChars)
                             chapterTitle = chapterTitle.Replace(invalidChar, '-');
 
                         var chapterIndex = reader.GetInt32(reader.GetOrdinal("ChapterIndex"));
@@ -241,20 +250,35 @@ End:
 
                         var videoIndex = reader.GetInt32(reader.GetOrdinal("SortIndex"));
                         var title = reader.GetString(reader.GetOrdinal("Title"));
-                        foreach (char invalidChar in Path.GetInvalidFileNameChars())
+                        foreach (char invalidChar in invalidFileChars)
                             title = title.Replace(invalidChar, '-');
 
-                        var newPath = Path.Combine(containingDir.FullName, $"E{videoIndex.ToString()} - {title}.mp4");
-                        taskList.Add(Task.Factory.StartNew(() => Decrypt(item, newPath)));
+                        newPath = Path.Combine(containingDir.FullName, $"E{videoIndex.ToString()} - {title}.mp4");
+
+                        if (newPath.Length > 240)
+                            newPath = Path.Combine(containingDir.FullName, $"E{videoIndex.ToString()}.mp4");
                     }
                     else
                     {
                         WriteToConsole("[STATUS] Couldn't find db entry for file: " + item + Environment.NewLine + "[STATUS] Using the default behaviour!", ConsoleColor.DarkYellow);
-                        taskList.Add(Task.Factory.StartNew(() => Decrypt(item, Path.ChangeExtension(item, ".mp4"))));
+                        newPath = Path.ChangeExtension(item, ".mp4");
                     }
+
+                    if (!reader.IsClosed)
+                        reader.Close();
                 }
                 else
-                    taskList.Add(Task.Factory.StartNew(() => Decrypt(item, Path.ChangeExtension(item, ".mp4"))));
+                {
+                    await semaphore.WaitAsync();
+                    newPath = Path.ChangeExtension(item, ".mp4");
+                }
+
+                await semaphore.WaitAsync();
+                taskList.Add(Task.Run(() =>
+                {
+                    Decrypt(item, newPath);
+                    semaphore.Release();
+                }));
             }
 
             await Task.WhenAll(taskList);
@@ -269,14 +293,25 @@ End:
                 return;
             }
 
-            if(File.Exists(decryptedFilePath))
+            FileInfo encryptedFileInfo = new FileInfo(encryptedFilePath);
+
+            if (File.Exists(decryptedFilePath))
             {
-                WriteToConsole("[DEC] File " + decryptedFilePath + " exists already and will be skipped!", ConsoleColor.Yellow);
-                return;
+                FileInfo decryptedFileInfo = new FileInfo(decryptedFilePath);
+
+                if (decryptedFileInfo.Length == encryptedFileInfo.Length)
+                {
+                    WriteToConsole("[DEC] File " + decryptedFilePath + " exists already and will be skipped!", ConsoleColor.Yellow);
+                    return;
+                }
+                else
+                    WriteToConsole("[DEC] File " + decryptedFilePath + " exists already but seems to differ in size...", ConsoleColor.Blue);
+
+                decryptedFileInfo = null;
             }
 
-            FileInfo encryptedFileInfo = new FileInfo(encryptedFilePath);
-            byte[] buffer = new byte[0x500000];
+            
+            byte[] buffer = new byte[0x5000];
 
             if (encryptedFileInfo.Extension != ".lynda")
             {
@@ -301,13 +336,19 @@ End:
                     decryptionStream.Read(buffer, 0, buffer.Length);
                     outStream.Write(buffer, 0, buffer.Length);
                     outStream.Flush();
+                    outStream.Close();
 
                     WriteToConsole("[DEC] File decryption completed: " + decryptedFilePath, ConsoleColor.DarkGreen);
                 }
+
+                inStream.Close();
+                buffer = null;
             }
 
             if((usage_mode & Mode.RemoveFiles) == Mode.RemoveFiles)
                 encryptedFileInfo.Delete();
+
+            encryptedFileInfo = null;
         }
 
         static void WriteToConsole(string Text, ConsoleColor color = ConsoleColor.Gray)
