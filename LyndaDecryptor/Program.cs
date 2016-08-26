@@ -16,7 +16,8 @@ namespace LyndaDecryptor
         Single = 2,
         Folder = 4,
         DB_Usage = 8,
-        RemoveFiles = 16
+        RemoveFiles = 16,
+        SpecialOutput = 32
     };
 
     class Program
@@ -28,13 +29,14 @@ namespace LyndaDecryptor
 
         static RijndaelManaged rijndael;
         static byte[] enc_key_bytes;
-        static ICryptoTransform decryptor;
 
         static ConsoleColor color_default = Console.ForegroundColor;
         static Mode usage_mode = Mode.None;
 
-        static string directory, file_source, file_destination, db_path = string.Empty;
+        static string directory, file_source, file_destination, db_path = string.Empty, out_path = string.Empty;
         static object console_lock = new object();
+        static SemaphoreSlim semaphore = new SemaphoreSlim(5);
+        static object sem_lock = new object();
         
 
         static void Main(string[] args)
@@ -103,6 +105,13 @@ namespace LyndaDecryptor
                             WriteToConsole("[ARGS] Press any key to continue..." + Environment.NewLine, ConsoleColor.Yellow);
                             Console.ReadKey();
                             break;
+
+                        case "/OUT":
+                            usage_mode |= Mode.SpecialOutput;
+
+                            if (args.Length - 1 > arg_index)
+                                out_path = args[arg_index + 1];
+                            break;
                     }
 
                     arg_index++;
@@ -120,7 +129,7 @@ namespace LyndaDecryptor
                     InitDB();
 
                 if ((usage_mode & Mode.Folder) == Mode.Folder)
-                    DecryptAll(directory, (usage_mode & Mode.DB_Usage) == Mode.DB_Usage);
+                    DecryptAll(directory, out_path, (usage_mode & Mode.DB_Usage) == Mode.DB_Usage);
                 else if ((usage_mode & Mode.Single) == Mode.Single)
                     Decrypt(file_source, file_destination);
 
@@ -131,15 +140,12 @@ namespace LyndaDecryptor
                 WriteToConsole("[START] Error occured: " + e.Message + Environment.NewLine, ConsoleColor.Red);
                 Usage();
             }
-            finally
-            {
-                if (sqlite_db_connection != null && sqlite_db_connection.State == System.Data.ConnectionState.Open)
-                    sqlite_db_connection.Close();
-            }
-
 End:
             WriteToConsole(Environment.NewLine + "Press any key to exit the program...");
             Console.ReadKey();
+
+            if (sqlite_db_connection != null && sqlite_db_connection.State == System.Data.ConnectionState.Open)
+                sqlite_db_connection.Close();
         }
 
         private static void InitDB()
@@ -177,7 +183,6 @@ End:
             };
 
             enc_key_bytes = new ASCIIEncoding().GetBytes(ENCRYPTION_KEY);
-            decryptor = rijndael.CreateDecryptor(enc_key_bytes, enc_key_bytes);
 
             WriteToConsole("[START] Decryptor successful initalized!" + Environment.NewLine, ConsoleColor.Green);
         }
@@ -192,26 +197,36 @@ End:
             Console.WriteLine("\t/F\tSource and Destination file are specified.");
             Console.WriteLine("\t/DB\tSearch for Database or specify the location on your system.");
             Console.WriteLine("\t/RM\tRemoves all files after decryption is complete.");
+            Console.WriteLine("\t/OUT\tSpecifies an output directory instead of using default directory.");
         }
 
-        static async void DecryptAll(string folderPath, bool useDB = false)
+        static async void DecryptAll(string folderPath, string outputFolder = "", bool useDB = false)
         {
             if (!Directory.Exists(folderPath))
                 throw new DirectoryNotFoundException();
 
             List<Task> taskList = new List<Task>();
 
-            foreach(string entry in Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories))
+            foreach (string entry in Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories))
             {
+                string newPath = outputFolder;
                 var item = entry;
-                var semaphore = new SemaphoreSlim(10);
-                string newPath = "";
 
                 if (useDB)
                 {
                     DirectoryInfo containingDir;
-                    DirectoryInfo info = containingDir = new DirectoryInfo(Path.GetDirectoryName(item));
+                    DirectoryInfo info = new DirectoryInfo(Path.GetDirectoryName(item));
                     string videoID = Path.GetFileName(item).Split('_')[0];
+
+                    if (!string.IsNullOrWhiteSpace(outputFolder))
+                    {
+                        if (Directory.Exists(outputFolder))
+                            containingDir = new DirectoryInfo(outputFolder);
+                        else
+                            containingDir = Directory.CreateDirectory(outputFolder);
+                    }
+                    else
+                        containingDir = info;
 
                     var cmd = sqlite_db_connection.CreateCommand();
 
@@ -230,10 +245,10 @@ End:
                             courseTitle = courseTitle.Replace(invalidChar, '-');
 
                         // Use the existing directory or create a new folder with the courseTitle
-                        if (!Directory.Exists(Path.Combine(info.FullName, courseTitle)))
-                            containingDir = info.CreateSubdirectory(courseTitle);
+                        if (!Directory.Exists(Path.Combine(containingDir.FullName, courseTitle)))
+                            containingDir = containingDir.CreateSubdirectory(courseTitle);
                         else
-                            containingDir = new DirectoryInfo(Path.Combine(info.FullName, courseTitle));
+                            containingDir = new DirectoryInfo(Path.Combine(containingDir.FullName, courseTitle));
 
                         // Create or use another folder to group by the Chapter
                         var chapterTitle = reader.GetString(reader.GetOrdinal("ChapterTitle"));
@@ -273,11 +288,15 @@ End:
                     newPath = Path.ChangeExtension(item, ".mp4");
                 }
 
-                await semaphore.WaitAsync();
+
+                semaphore.Wait();
                 taskList.Add(Task.Run(() =>
                 {
                     Decrypt(item, newPath);
-                    semaphore.Release();
+                    lock(sem_lock)
+                    {
+                        semaphore.Release();
+                    }
                 }));
             }
 
@@ -311,7 +330,7 @@ End:
             }
 
             
-            byte[] buffer = new byte[0x5000];
+            byte[] buffer = new byte[0x50000];
 
             if (encryptedFileInfo.Extension != ".lynda")
             {
@@ -321,7 +340,7 @@ End:
 
             using (FileStream inStream = new FileStream(encryptedFilePath, FileMode.Open))
             {
-                using (CryptoStream decryptionStream = new CryptoStream(inStream, decryptor, CryptoStreamMode.Read))
+                using (CryptoStream decryptionStream = new CryptoStream(inStream, rijndael.CreateDecryptor(enc_key_bytes, enc_key_bytes), CryptoStreamMode.Read))
                 using (FileStream outStream = new FileStream(decryptedFilePath, FileMode.Create))
                 {
                     WriteToConsole("[DEC] Decrypting file " + encryptedFileInfo.Name + "...");
