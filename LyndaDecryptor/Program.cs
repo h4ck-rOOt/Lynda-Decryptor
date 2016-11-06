@@ -230,10 +230,16 @@ End:
 
                     var cmd = sqlite_db_connection.CreateCommand();
 
-                    cmd.CommandText = "SELECT Video.ID, Video.ChapterId, Video.CourseId, Video.Title, Filename, Video.CourseTitle, Video.SortIndex, Chapter.Title as ChapterTitle, Chapter.SortIndex as ChapterIndex FROM Video " +
-                                      "INNER JOIN Chapter ON Video.ChapterId = Chapter.ID " +
-                                      $"WHERE Video.CourseId = {info.Name} AND Video.ID = {videoID}";
+                    //Changed the query to get course title
+                    cmd.CommandText = @"SELECT Video.ID, Video.ChapterId, Video.CourseId, Video.Title, Filename, Course.Title as CourseTitle, Video.SortIndex, Chapter.Title as ChapterTitle, Chapter.SortIndex as ChapterIndex 
+                                        FROM Video, Course, Chapter 
+                                        WHERE Video.ChapterId = Chapter.ID
+                                        AND Course.ID = Video.CourseId 
+                                        AND Video.CourseId = @courseId 
+                                        AND Video.ID = @videoId";
 
+                    cmd.Parameters.Add(new SQLiteParameter("@courseId", info.Name));
+                    cmd.Parameters.Add(new SQLiteParameter("@videoId", videoID));
 
                     var reader = cmd.ExecuteReader(System.Data.CommandBehavior.Default);
 
