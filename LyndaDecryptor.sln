@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.25123.0
+VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LyndaDecryptor", "LyndaDecryptor\LyndaDecryptor.csproj", "{58EBF661-A637-45AE-956C-5EC1A602EDC3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LyndaDecryptorTests", "LyndaDecryptorTests\LyndaDecryptorTests.csproj", "{F8726170-D017-4517-AFB9-B1870A282E81}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -18,6 +20,12 @@ Global
 		{58EBF661-A637-45AE-956C-5EC1A602EDC3}.Release|Any CPU.Build.0 = Release|Any CPU
 		{58EBF661-A637-45AE-956C-5EC1A602EDC3}.TestDB|Any CPU.ActiveCfg = TestDB|Any CPU
 		{58EBF661-A637-45AE-956C-5EC1A602EDC3}.TestDB|Any CPU.Build.0 = TestDB|Any CPU
+		{F8726170-D017-4517-AFB9-B1870A282E81}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8726170-D017-4517-AFB9-B1870A282E81}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8726170-D017-4517-AFB9-B1870A282E81}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8726170-D017-4517-AFB9-B1870A282E81}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8726170-D017-4517-AFB9-B1870A282E81}.TestDB|Any CPU.ActiveCfg = Release|Any CPU
+		{F8726170-D017-4517-AFB9-B1870A282E81}.TestDB|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
