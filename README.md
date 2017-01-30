@@ -18,4 +18,11 @@ Converting subtitles is possible (thanks to @mdomnita) with this little tool [Re
 
 ---
 
+## Limitations
+This program is **windows only** at the time of this writing. You can compile it under Linux and Mac using [Mono](http://www.mono-project.com/) or [DotNetCore](https://www.microsoft.com/net/core), with some changes due to the sqlite platform binding.
+
+At the moment **decrypting files from android or ios apps are not supported**
+
+---
+
 ![Lynda.com](https://upload.wikimedia.org/wikipedia/commons/thumb/5/5f/Video2brain.jpg/800px-Video2brain.jpg)
