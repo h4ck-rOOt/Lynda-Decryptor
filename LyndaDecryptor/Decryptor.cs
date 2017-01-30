@@ -126,8 +126,10 @@ namespace LyndaDecryptor
             if (!Directory.Exists(folderPath))
                 throw new DirectoryNotFoundException();
 
-            if (!string.IsNullOrWhiteSpace(outputFolder))
-                OutputDirectory = Directory.Exists(outputFolder) ? new DirectoryInfo(outputFolder) : Directory.CreateDirectory(outputFolder);
+            if(string.IsNullOrWhiteSpace(outputFolder))
+                outputFolder = Path.Combine(Path.GetDirectoryName(folderPath), "decrypted");
+
+            OutputDirectory = Directory.Exists(outputFolder) ? new DirectoryInfo(outputFolder) : Directory.CreateDirectory(outputFolder);
 
             foreach (string entry in Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories))
             {

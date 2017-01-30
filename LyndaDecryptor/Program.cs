@@ -46,7 +46,7 @@ namespace LyndaDecryptor
                     
 
                 if (decryptorOptions.UsageMode == Mode.Folder)
-                    decryptor.DecryptAll(decryptorOptions.InputPath, decryptorOptions.OutputPath);
+                    decryptor.DecryptAll(decryptorOptions.InputPath, decryptorOptions.OutputFolder);
                 else if (decryptorOptions.UsageMode == Mode.File)
                     decryptor.Decrypt(decryptorOptions.InputPath, decryptorOptions.OutputPath);
             }
