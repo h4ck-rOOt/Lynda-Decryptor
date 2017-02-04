@@ -177,6 +177,7 @@ namespace LyndaDecryptor
                 TaskList.Add(Task.Run(() =>
                 {
                     Decrypt(item, newPath);
+                    convertSub(item, newPath);
                     lock (SemaphoreLock)
                     {
                         Semaphore.Release();
@@ -203,7 +204,7 @@ namespace LyndaDecryptor
             }
 
             FileInfo encryptedFileInfo = new FileInfo(encryptedFilePath);
-
+            
             if (File.Exists(decryptedFilePath))
             {
                 FileInfo decryptedFileInfo = new FileInfo(decryptedFilePath);
@@ -253,6 +254,8 @@ namespace LyndaDecryptor
                 inStream.Close();
                 buffer = null;
             }
+
+            convertSub(encryptedFilePath, decryptedFilePath);
 
             if (Options.RemoveFilesAfterDecryption)
                 encryptedFileInfo.Delete();
@@ -326,6 +329,39 @@ namespace LyndaDecryptor
                 path = path.Replace(invalidChar, '-');
 
             return path;
+        }
+
+
+        /// <summary>
+        /// get caption path and create subtitle in the same plae as the decrypted video
+        /// </summary>
+        /// <param name="videoPath">Initial video path (.lynda file)</param>
+        /// <param name="decryptedFilePath">Full decrypted video path</param>
+        /// <returns>boolean value, true for succesful conversion</returns>
+        private Boolean convertSub(string videoPath,string decryptedFilePath) {
+            using (MD5 md5 = System.Security.Cryptography.MD5.Create())
+            {
+                var videoId = Path.GetFileName(videoPath).Split('_')[0];
+
+                byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(videoId);
+                byte[] hashBytes = md5.ComputeHash(inputBytes);
+
+                // Convert the byte array to hexadecimal string
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i<hashBytes.Length; i++)
+                {
+                    sb.Append(hashBytes[i].ToString("X2"));
+                }
+                var subFName = sb.ToString() + ".caption";
+
+                var csConv = new CaptionToSrt(Path.Combine(Path.GetDirectoryName(videoPath), subFName));
+
+                var srtFile = Path.Combine(Path.GetDirectoryName(decryptedFilePath),Path.GetFileNameWithoutExtension(decryptedFilePath)+".srt");
+                csConv.OutFile = srtFile;
+
+                return csConv.convertToSrt();
+                
+            }
         }
 
         #endregion
