@@ -100,14 +100,22 @@ namespace LyndaDecryptor
                         text = subline[1];
                         //there may be a number or sign before the actual text, drop it.
                         //ATTENTION, if there is a subtitle phrase starting eth numbers or symbols this line will delete information from it
-                        text = Regex.Replace(text, @"^[\u0020-\u0040]+", "");
+                        text = Regex.Replace(text, @"^[\u0020-\u0040\-\u005B-\u0060]{1,2}[\r\n\t]?", "");
                         //and delete any useless newlines at the end.
-                        text = Regex.Replace(text, @"[\r\n\t]+$", "");
+                        text = Regex.Replace(text, @"[\r\n\t]+[\u0020-\u0040\-]?$", "");
+                        text = Regex.Replace(text, @"^[a-zA-Z0-9.]{0,2}[\r\n\t]+", "");
                         timestamps.Add(start);
                         captions.Add(text);
                     }
+                    else if (subline.Length == 1 && i == phrases.Length - 1)
+                    {
+                        //add last timestamp to subtitle
+                        start = Regex.Replace(subline[0], "\\.", ",");
+                        start = start.Substring(1, start.Length - 2);
+                        timestamps.Add(start);
 
-                    this.buildSrt(timestamps, captions, this.outFile);
+                    }
+                        this.buildSrt(timestamps, captions, this.outFile);
                 }
                 catch (Exception ex)
                 {
