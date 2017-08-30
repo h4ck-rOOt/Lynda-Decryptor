@@ -354,13 +354,21 @@ namespace LyndaDecryptor
                 }
                 var subFName = sb.ToString() + ".caption";
 
-                var csConv = new CaptionToSrt(Path.Combine(Path.GetDirectoryName(videoPath), subFName));
+                string captionFilePath = Path.Combine(Path.GetDirectoryName(videoPath), subFName);
 
-                var srtFile = Path.Combine(Path.GetDirectoryName(decryptedFilePath),Path.GetFileNameWithoutExtension(decryptedFilePath)+".srt");
-                csConv.OutFile = srtFile;
+                if (File.Exists(captionFilePath))
+                {
+                    var csConv = new CaptionToSrt(captionFilePath);
 
-                return csConv.convertToSrt();
-                
+                    var srtFile = Path.Combine(Path.GetDirectoryName(decryptedFilePath), Path.GetFileNameWithoutExtension(decryptedFilePath) + ".srt");
+                    csConv.OutFile = srtFile;
+
+                    return csConv.convertToSrt();
+                }
+                else
+                {
+                    return false;
+                }
             }
         }
 
