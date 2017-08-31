@@ -167,8 +167,23 @@ namespace LyndaDecryptor
             // Read content of source subtitle file as bytes
             byte[] subtitleFile = File.ReadAllBytes(filePath);
 
-            // Split by double newlines (CRLFCRLF).
-            byte[][] rawSubtitles = splitByteArrayByDelimiter(subtitleFile, stringToBytes("\r\n\r\n"));
+            // Split by double newlines (CRLFCRLF or LFLF). They can be different depending on the platform the subtitles were created on, and can be mixed per course.
+            // Since it's not known in advance which linebreaks are used, split the file by both and see which produces the most lines.
+            string[] doubleLinebreaksArray = { "\r\n\r\n", "\n\n" };
+            string[] singleLinebreaksArray = { "\r\n", "\n" };
+            string singleLinebreak = "\n"; // Setting this as default should something go wrong.
+            byte[][] rawSubtitles = new byte[0][];
+            byte[][] splitSubtitles;
+            for (int linebreakIndex = 0; linebreakIndex < doubleLinebreaksArray.Length; linebreakIndex++)
+            {
+                string currentLinebreak = doubleLinebreaksArray[linebreakIndex];
+                splitSubtitles = splitByteArrayByDelimiter(subtitleFile, stringToBytes(currentLinebreak));
+                if (splitSubtitles.Length > rawSubtitles.Length)
+                {
+                    rawSubtitles = splitSubtitles;
+                    singleLinebreak = singleLinebreaksArray[linebreakIndex];
+                }
+            }
 
             byte[] rawSubtitle;
             string timestamp;
@@ -208,7 +223,7 @@ namespace LyndaDecryptor
                         timestamps.Add(timestamp);
 
                         // Only add subtitle text if there is no return before before its start position (meaning there is no text following the timestamp).
-                        returnPosition = searchByteArray(rawSubtitle, stringToBytes("\r\n"), timeEndPosition + 1);
+                        returnPosition = searchByteArray(rawSubtitle, stringToBytes(singleLinebreak), timeEndPosition + 1);
                         if (returnPosition > textStartPosition || returnPosition == -1)
                         {
                             // Add subtitle text from its start position until the end of the raw subtitle.
