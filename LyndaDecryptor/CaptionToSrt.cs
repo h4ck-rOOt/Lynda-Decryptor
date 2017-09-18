@@ -45,193 +45,368 @@ namespace LyndaDecryptor
             }
         }
 
-        public string bytesToString(byte[] bytes, int from, int length)
-        {
-            return System.Text.Encoding.UTF8.GetString(bytes, from, length);
-        }
 
         public byte[] stringToBytes(string text)
         {
             return System.Text.Encoding.UTF8.GetBytes(text);
         }
 
-        public int searchByteArray(byte[] inputByteArray, byte[] searchBytes, int startPosition)
+
+        public int[] findTimestamps(byte[] inputByteArray)
         {
-            // This function is similar to the String.IndexOf() function, but for byte arrays.
-            // The input array is searched for the occurrence of the search term, also represented as a byte array, using a Boyer-Moore search algorithm.
+            byte openingBracket = stringToBytes("[")[0];
+            byte closingBracket = stringToBytes("]")[0];
+            byte colon = stringToBytes(":")[0];
+            byte dot = stringToBytes(".")[0];
 
-            // Build jumptable
-            Dictionary<Byte, int> jumptable = new Dictionary<Byte, int>();
-            int searchBytesMaxIndex = searchBytes.Length - 1;
-            Byte currentSearchByte;
-            for (int searchBytesIndex = searchBytesMaxIndex; searchBytesIndex >= 0; searchBytesIndex--)
-            {
-                currentSearchByte = searchBytes[searchBytesIndex];
-                if (! jumptable.ContainsKey(currentSearchByte))
-                {
-                    jumptable.Add(currentSearchByte, searchBytesMaxIndex - searchBytesIndex);
-                }
-            }
-            // Remove last character in the search term from the jumptable.
-            // It was useful for preventing other occurrences of this character from ending up in the jumptable, but it's not used for searching.
-            // Technically it wouldn't break anything by being there but let's remove it for the sake of clarity.
-            jumptable.Remove(searchBytes[searchBytesMaxIndex]);
+            // Offsets for the following characters are relative to the opening bracket.
+            int firstColonOffset = 3;
+            int secondColonOffset = 6;
+            int dotOffset = 9;
+            int closingBracketOffset = 12;
 
-            // Perform the search
-            int inputArrayIndex = startPosition + searchBytesMaxIndex;
-            Byte currentInputByte;
-            bool matchFound;
-            while (inputArrayIndex < inputByteArray.Length)
+            int rangeStartOffset = -16; // Start of binary data before timestamp occurs this far from the opening bracket.
+            int rangeEndOffset = 26;    // End of binary data after timestamp occurs this far from the opening bracket.
+            List<int> timestampRangePositionList = new List<int>();
+            int inputIndex = 16; // Valid opening bracket can't occur before this position so start here.
+            bool foundTimestamp = false;
+            byte inputCharacter;
+            int inputLength = inputByteArray.Length;
+
+            while (inputIndex < inputLength)
             {
-                matchFound = true; // Match not actually found yet, but if this is still true after the full comparison completes there's an actual match.
-                for (int searchBytesIndex = searchBytesMaxIndex; searchBytesIndex >= 0; searchBytesIndex--)
+                inputCharacter = inputByteArray[inputIndex];
+                if (inputCharacter == openingBracket)
                 {
-                    currentInputByte = inputByteArray[inputArrayIndex - (searchBytesMaxIndex - searchBytesIndex)];
-                    currentSearchByte = searchBytes[searchBytesIndex];
-                    if (currentInputByte == currentSearchByte)
+                    if (inputCharacter + rangeEndOffset <= inputLength)
                     {
-                        // This character matches, check next character.
-                        continue;
-                    }
-                    else
-                    {
-                        if (jumptable.ContainsKey(currentInputByte))
+                        if (inputByteArray[inputIndex + closingBracketOffset] == closingBracket &&
+                            inputByteArray[inputIndex + firstColonOffset] == colon &&
+                            inputByteArray[inputIndex + secondColonOffset] == colon &&
+                            inputByteArray[inputIndex + dotOffset] == dot)
                         {
-                            // Another character in the search term matches this input character. Jump forward by the corresponding amount.
-                            inputArrayIndex = inputArrayIndex + jumptable[currentInputByte];
+                            // All timestamp identifiers match, timestamp located.
+                            foundTimestamp = true;
                         }
                         else
                         {
-                            // This character doesn't have any match, jump past it.
-                            inputArrayIndex = inputArrayIndex + searchBytesIndex + 1;
+                            // Not enough space after opening bracket for this to be a real subtitle.
+                            foundTimestamp = false;
                         }
-                        // No match for the search term at this position, stop checking further characters of the search term.
-                        matchFound = false;
-                        break;
+                    }
+                    else
+                    {
+                        // Opening bracket was not part of timestamp.
+                        foundTimestamp = false;
                     }
                 }
-                if (matchFound)
+                if (foundTimestamp)
                 {
-                    // Match was found; return its position and exit function.
-                    return inputArrayIndex - searchBytesMaxIndex;
-                }
-            }
-            // No match was found in the entire input (from the start position). Return -1.
-            return -1;
-        }
-
-        public byte[][] splitByteArrayByDelimiter(byte[]  inputByteArray, byte[] delimiter)
-        {
-            // This function is similar to the String.Split() function, but for byte arrays.
-            // The array is split into multiple parts at the places where the delimiter occurs.
-
-            List<byte[]> choppedArray = new List<byte[]>();
-            int chopPoint = 0;
-            int chopLength;
-            byte[] newChop;
-            int delimiterFoundPosition;
-
-            // Look for the delimiter in the input array until all occurrences have been found.
-            do
-            {
-                // Search for delimiter in input array.
-                delimiterFoundPosition = searchByteArray(inputByteArray, delimiter, chopPoint);
-                if (delimiterFoundPosition >= 0)
-                {
-                    // Cut everything between this occurrence of the delimiter and the last.
-                    chopLength = delimiterFoundPosition - chopPoint;
+                    timestampRangePositionList.Add(inputIndex + rangeStartOffset);
+                    // Set checkpoint for next timestamp beyond the range of this one and the leading binary data of the next.
+                    inputIndex += rangeEndOffset + 1 - rangeStartOffset;
+                    // Reset found flag.
+                    foundTimestamp = false;
                 }
                 else
                 {
-                    // Delimiter not found, append remaining part of the input to the final result.
-                    chopLength = inputByteArray.Length - chopPoint;
+                    inputIndex++;
                 }
-                // Cut the text adjacent to the delimiters and add it to the output array.
-                newChop = new byte[chopLength];
-                Array.Copy(inputByteArray, chopPoint, newChop, 0, chopLength);
-                choppedArray.Add(newChop);
-                chopPoint = delimiterFoundPosition + delimiter.Length + 1;
-            } while (delimiterFoundPosition >= 0);
-            return choppedArray.ToArray();
+            }
+            return timestampRangePositionList.ToArray();
         }
+
+
+        public class Subtitle
+        {
+            private int textStartPosition = 43;
+
+            public bool isValidSubtitle
+            {
+                get
+                {
+                    if (start_timestamp != null &&
+                        end_timestamp != null &&
+                        subtitleText != null)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            private string start_timestamp;
+            public string Start_timestamp
+            {
+                get { return start_timestamp; }
+            }
+
+            private string end_timestamp;
+            public string End_timestamp
+            {
+                get { return end_timestamp; }
+            }
+
+            private string subtitleText;
+            public string SubtitleText
+            {
+                get { return subtitleText; }
+            }
+
+            // Initialize subtitle object.
+            public Subtitle(byte[] subtitleData)
+            {
+                extractStartTimestamp(subtitleData);
+                extractText(subtitleData);
+            }
+
+            public void setEndTimestamp(string endtime)
+            {
+                end_timestamp = endtime;
+            }
+
+            private void extractStartTimestamp(byte[] subtitleData)
+            {
+                // Timestamp (without brackets) is 11 bytes long and starts at position 17.
+                byte[] timestampByteArray = new byte[11];
+                Array.Copy(subtitleData, 17, timestampByteArray, 0, 11);
+                string timestampString = bytesToString(timestampByteArray, timestampByteArray.Length);
+                // Change "." in timestamp to "," which is used in the SRT format.
+                start_timestamp = Regex.Replace(timestampString, "\\.", ",");
+            }
+
+            private void extractText(byte[] subtitleData)
+            {
+                bool hasValidText;
+                byte[] trimmedText = new byte[0];
+                // Text data starts at byte 43.
+                if (subtitleData.Length > textStartPosition)
+                {
+                    // Subtitle is long enough to contain text following the timestamp.
+                    int textLength = subtitleData.Length - textStartPosition;
+                    byte[] textPortion = new byte[textLength];
+                    Array.Copy(subtitleData, 43, textPortion, 0, textLength);
+                    trimmedText = trimNonprintable(textPortion);
+                    if (trimmedText.Length > 0)
+                    {
+                        hasValidText = true;
+                    }
+                    else
+                    {
+                        hasValidText = false;
+                    }
+                }
+                else
+                {
+                    // Subtitle is too short to have text.
+                    hasValidText = false;
+                }
+                if (hasValidText)
+                {
+                    trimmedText = enforce_CRLF_linebreaks(trimmedText);
+                    subtitleText = bytesToString(trimmedText, trimmedText.Length);
+                }
+            }
+
+            private byte[] trimNonprintable(byte[] textData)
+            {
+                List<byte> textList = textData.ToList();
+                int currentCharacter;
+                int removeIndex;
+                bool searchForward = true;
+
+                // Trim beginning of text.
+                while (textList.Count > 0)
+                {
+                    if (searchForward)
+                    {
+                        // Scan forwards from beginning of text.
+                        currentCharacter = Convert.ToInt32(textList.First());
+                        removeIndex = 0;
+                    }
+                    else
+                    {
+                        // Scan backwards from end of text.
+                        currentCharacter = Convert.ToInt32(textList.Last());
+                        removeIndex = textList.Count - 1;
+                    }
+                    if (currentCharacter < 33 || currentCharacter > 126)
+                    {
+                        // Character values lower than 33 or higher than 126 are all nonprintable, remove them.
+                        textList.RemoveAt(removeIndex);
+                    }
+                    else
+                    {
+                        // Hit a printable character.
+                        if (searchForward)
+                        {
+                            // Switch to trimming end of text.
+                            searchForward = false;
+                        }
+                        else
+                        {
+                            // Trimming complete.
+                            break;
+                        }
+                    }
+                }
+                return textList.ToArray();
+            }
+
+            private byte[] enforce_CRLF_linebreaks(byte[] text)
+            {
+                // Make all linebreaks CRLF (if they aren't already), just in case mixed linebreaks would trip up some SRT interpreter.
+                byte currentCharacter;
+                byte previousCharacter = 0x0; // Set to something not \r
+                int textLength = text.Length;
+                bool found_LF_linebreak = false;
+                List<byte> returnText = new List<byte>();
+                byte LF_Character = stringToBytes("\n")[0];
+                byte CR_Character = stringToBytes("\r")[0];
+                for (int characterIndex = 0; characterIndex < textLength; characterIndex++)
+                {
+                    currentCharacter = text[characterIndex];
+                    if (currentCharacter == LF_Character)
+                    {
+                        if (previousCharacter != CR_Character)
+                        {
+                            found_LF_linebreak = true;
+                        }
+                    }
+                    if (found_LF_linebreak)
+                    {
+                        returnText.Add(CR_Character);
+                        returnText.Add(LF_Character);
+                        // Reset found flag.
+                        found_LF_linebreak = false;
+                    }
+                    else
+                    {
+                        returnText.Add(currentCharacter);
+                    }
+                    previousCharacter = currentCharacter;
+                }
+                return returnText.ToArray();
+            }
+
+            private string bytesToString(byte[] bytes, int length)
+            {
+                return System.Text.Encoding.UTF8.GetString(bytes, 0, length);
+            }
+
+            private byte[] stringToBytes(string text)
+            {
+                return System.Text.Encoding.UTF8.GetBytes(text);
+            }
+        }
+
+        public Subtitle[] parseCaptionData(byte[] captionData, int[] subtitlePositions)
+        {
+            // Extract subtitles from caption file data.
+            int positionCount = subtitlePositions.Length;
+            int startPosition;
+            int subtitleLength;
+            byte[] newSubtitleData;
+            Subtitle newSubtitle;
+            List<Subtitle> subtitleList = new List<Subtitle>();
+            for (int positionIndex = 0; positionIndex < positionCount; positionIndex++)
+            {
+                startPosition = subtitlePositions[positionIndex];
+                if (positionIndex == positionCount - 1)
+                {
+                    // The last subtitle extends to the end of the caption data.
+                    subtitleLength = captionData.Length - startPosition;
+                }
+                else
+                {
+                    // The subtitle extends up to the beginning of the next one.
+                    subtitleLength = subtitlePositions[positionIndex + 1] - startPosition;
+                }
+                newSubtitleData = new byte[subtitleLength];
+                Array.Copy(captionData, startPosition, newSubtitleData, 0, subtitleLength);
+
+                // Create subtitle object, which also handles parsing of the data.
+                newSubtitle = new Subtitle(newSubtitleData);
+                subtitleList.Add(newSubtitle);
+            }
+
+            // Set end time of each subtitle to the beginning of the next one.
+            int subtitleCount = subtitleList.Count;
+            for (int subtitleIndex = 0; subtitleIndex < subtitleCount; subtitleIndex++)
+            {
+                if (subtitleIndex < subtitleCount - 1)
+                {
+                    // End timestamp is equal to the start timestamp of the next one. Skip this for the last subtitle because there is no next one. It wouldn't contain text anyway.
+                    Subtitle currentSub = subtitleList[subtitleIndex];
+                    Subtitle nextSub = subtitleList[subtitleIndex + 1];
+                    currentSub.setEndTimestamp(nextSub.Start_timestamp);
+                }
+            }
+
+            // Discard subtitles that have no text
+            List<Subtitle> filteredSubtitles = new List<Subtitle>();
+            for (int subtitleIndex = 0; subtitleIndex < subtitleCount; subtitleIndex++)
+            {
+                Subtitle currentSub = subtitleList[subtitleIndex];
+                if (currentSub.isValidSubtitle)
+                {
+                    filteredSubtitles.Add(currentSub);
+                }
+            }
+
+            // Return array of valid subtitles.
+            return filteredSubtitles.ToArray();
+        }
+
 
         public bool convertToSrt()
         {
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-            // The .caption files consist of subtitle data with extraneous, non-printable data interposed.                                                                //
-            // The subtitle data is positioned at predictable locations in the file. This function operates based on that principle.                                      //
-            // The code below mostly deals with the subtitles in byte-form. While performing these operations on strings would be more simple and concise,                //
-            // it can interfere with the evenly-spaced layout of the data, sometimes producing extra or missing characters. Handling the data in byte-form prevents that. //
+            // NOTES ON THE STRUCTURE OF .CAPTION FILES                                                                                                                   //
+            //                                                                                                                                                            //
+            // The .caption files start with a header. It is ignored by the conversion function.                                                                          //
+            // Following the header are blocks of subtitle data. These blocks consist of 16 bytes of binary data, followed by a timestamp in the format [##:##:##.##].    //
+            // This is followed by another 14 bytes of binary data, after which the text of the subtitle starts. The text continues until the next block.                 //
+            // Some blocks contain no valid text, and serve as markers for the end time of the previous block. They usually occur once (or several times) at the end of   //
+            // the .caption file, but can sometimes be found following each valid subtitle block.                                                                         //
+            // Linebreaks used by .caption files are usually CRLF, but can also be LF. This may be different for each video.                                              //
+            // Blocks are most often separated by double, but sometimes single linebreaks (in combination with end-time blocks).                                          //
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-            // Read content of source subtitle file as bytes
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            // NOTES ON THE CONVERSION CODE                                                                                                                               //
+            //                                                                                                                                                            //
+            // During testing, splitting subtitle blocks by linebreaks was the first attempted method of extracting data. It came with some hard-to-squish bugs, as the   //
+            // binary data mentioned above would sometimes randomly produce linebreak characters. The method of extraction was then switched to locating the timestamps   //
+            // and going from there. Their fixed location in the subtitle block makes it easy to locate (and ignore) other elements in the block.                         //
+            //                                                                                                                                                            //
+            // The data is mostly handled in byte-form. While performing  operations on strings would be more simple and concise, it can interfere with the evenly-spaced //
+            // layout of the data, sometimes producing extra or missing characters. Handling the data in byte-form prevents that.                                         //
+            ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+            // Read content of source subtitle file as bytes.
             byte[] subtitleFile = File.ReadAllBytes(filePath);
 
-            // Split by double newlines (CRLFCRLF).
-            byte[][] rawSubtitles = splitByteArrayByDelimiter(subtitleFile, stringToBytes("\r\n\r\n"));
+            // Locate start positions of subtitles.
+            int[] subtitlePositions = findTimestamps(subtitleFile);
 
-            byte[] rawSubtitle;
-            string timestamp;
-            string text;
-            ArrayList timestamps = new ArrayList();
-            ArrayList captions = new ArrayList();
-            string timeStartCharacter;
-            string timeEndCharacter;
-            int returnPosition;
+            // Extract subtitles from file data.
+            Subtitle[] subtitles = parseCaptionData(subtitleFile, subtitlePositions);
 
-            // Following are the fixed beginning and ending positions for the timestamp and subtitle text.
-            // If subtitles are produced that look like they have erroneous extra or missing characters, try tweaking these numbers.
-            // Looking at the source subtitle file with a hex editor may help determine the correct positions.
-            int timeStartPosition = 15;  // Timestamp opening bracket always occurs at this position.
-            int timeEndPosition = 27;    // Timestamp closing bracket always occurs at this position.
-            int textStartPosition = 42;  // Subtitle text always starts at this position and continues until the end of the raw subtitle.
+            // Output data in .srt file.
+            this.buildSrt(subtitles, this.outFile);
 
-            // Extract timestamp and text from subtitle.
-            for (int subtitleIndex = 0; subtitleIndex < rawSubtitles.Length; subtitleIndex++)
-            {
-                try
-                {
-                    rawSubtitle = rawSubtitles[subtitleIndex];
-                    if (rawSubtitle.Length < textStartPosition)
-                    {
-                        // Skip this line if it's not even long enough to have subtitle text.
-                        continue;
-                    }
-                    timeStartCharacter = bytesToString(rawSubtitle, timeStartPosition, 1);
-                    timeEndCharacter = bytesToString(rawSubtitle, timeEndPosition, 1);
-                    if (timeStartCharacter == "[" && timeEndCharacter == "]")
-                    {
-                        // Extract the timestamp excluding the brackets.
-                        timestamp = bytesToString(rawSubtitle, timeStartPosition + 1, timeEndPosition - (timeStartPosition + 1));
-                        //separator for miliseconds is ',' in srt, '.' in .caption switch it
-                        timestamp = Regex.Replace(timestamp, "\\.", ",");
-                        timestamps.Add(timestamp);
-
-                        // Only add subtitle text if there is no return before before its start position (meaning there is no text following the timestamp).
-                        returnPosition = searchByteArray(rawSubtitle, stringToBytes("\r\n"), timeEndPosition + 1);
-                        if (returnPosition > textStartPosition || returnPosition == -1)
-                        {
-                            // Add subtitle text from its start position until the end of the raw subtitle.
-                            text = bytesToString(rawSubtitle, textStartPosition, rawSubtitle.Length - textStartPosition);
-                            captions.Add(text);
-                        }
-                    }
-                    this.buildSrt(timestamps, captions, this.outFile);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine("Error: Cannot convert caption content to srt " + ex.ToString());
-                    return false;
-                }
-            }
             return true;
         }
 
-        private bool buildSrt(ArrayList timestamps, ArrayList captions, string path)
+        private bool buildSrt(Subtitle[] subtitleArray, string path)
         {
             try
             {
-                StreamWriter writer = new StreamWriter(path);
                 //SRT is perhaps the most basic of all subtitle formats.
                 //It consists of four parts, all in text..
 
@@ -242,14 +417,17 @@ namespace LyndaDecryptor
 
                 //1
                 //00:02:17,440-- > 00:02:20,375
-                //and here goes the text, after which there's a blank line
+                //and here goes the text
+                //blank line
 
-                //last input in array is a single timestamp with no text, used only to see where the end of the last caption is
-                for (int i = 0; i < timestamps.Count - 1; i++)
+                StreamWriter writer = new StreamWriter(path);
+                Subtitle currentSubtitle;
+                for (int subtitleIndex = 0; subtitleIndex < subtitleArray.Length; subtitleIndex++)
                 {
-                    writer.WriteLine(i + 1);
-                    writer.WriteLine(timestamps[i] + " --> " + timestamps[i + 1]);
-                    writer.WriteLine(captions[i]);
+                    currentSubtitle = subtitleArray[subtitleIndex];
+                    writer.WriteLine(subtitleIndex + 1);
+                    writer.WriteLine(currentSubtitle.Start_timestamp + " --> " + currentSubtitle.End_timestamp);
+                    writer.WriteLine(currentSubtitle.SubtitleText);
                     writer.WriteLine();
                 }
                 writer.Close();
@@ -261,8 +439,5 @@ namespace LyndaDecryptor
                 return false;
             }
         }
-
-
-
     }
 }
