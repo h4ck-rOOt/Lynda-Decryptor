@@ -14,10 +14,12 @@ namespace LyndaDecryptor
         private string filePath;
         private string outFile;
 
+
         public CaptionToSrt(string afilePath)
         {
             this.filePath = afilePath;
         }
+
 
         public string FilePath
         {
@@ -31,6 +33,7 @@ namespace LyndaDecryptor
                 filePath = value;
             }
         }
+
 
         public string OutFile
         {
@@ -52,8 +55,30 @@ namespace LyndaDecryptor
         }
 
 
-        public int[] findTimestamps(byte[] inputByteArray)
+        public enum timestampFormat
         {
+            shortTimestamp, //Format [##:##:##.##], trailing binary data 14 bytes.
+            longTimestamp   //Format [##:##:##.###], trailing binary data 15 bytes.
+        }
+
+
+        public class Timestamp
+        {
+            public readonly int position;
+            public readonly timestampFormat type;
+
+            public Timestamp(int _position, timestampFormat _type)
+            {
+                position = _position;
+                type = _type;
+            }
+        }
+
+
+        public Timestamp[] findTimestamps(byte[] inputByteArray)
+        {
+            List<Timestamp> timestampList = new List<Timestamp>();
+
             byte openingBracket = stringToBytes("[")[0];
             byte closingBracket = stringToBytes("]")[0];
             byte colon = stringToBytes(":")[0];
@@ -63,64 +88,100 @@ namespace LyndaDecryptor
             int firstColonOffset = 3;
             int secondColonOffset = 6;
             int dotOffset = 9;
-            int closingBracketOffset = 12;
-
             int rangeStartOffset = -16; // Start of binary data before timestamp occurs this far from the opening bracket.
-            int rangeEndOffset = 26;    // End of binary data after timestamp occurs this far from the opening bracket.
-            List<int> timestampRangePositionList = new List<int>();
-            int inputIndex = 16; // Valid opening bracket can't occur before this position so start here.
-            bool foundTimestamp = false;
+
+            // Character positions for short timestamp.
+            int closingBracketOffset_shortTimestamp = 12;
+            int rangeEndOffset_shortTimestamp = 26; // End of binary data after timestamp occurs this far from the opening bracket.
+
+            // Character positions for long timestamp.
+            int closingBracketOffset_longTimestamp = 13;
+            // int rangeEndOffset_longTimestamp = 27; // End of binary data after timestamp occurs this far from the opening bracket. // Not used in this part of the code, but still good to be aware of.
+
+            // The distance you can skip forward when searching for the next timestamp. This can vary according to the timestamp format. More logic could be put into this, but taking the length belonging to the shortest format is simplest and safest.
+            int minimumRangeEndOffset = rangeEndOffset_shortTimestamp;
+            
+            timestampFormat timestampFormat = timestampFormat.shortTimestamp; //Default value, real format will be determined later.
+
+            int inputIndex = rangeStartOffset * -1; // Valid opening bracket can't occur before this position so start here.
+            bool foundTimestamp = false; //Default value, will be set to true later if a timestamp is found.
             byte inputCharacter;
             int inputLength = inputByteArray.Length;
 
+            // Look for timestamps in the caption file data.
             while (inputIndex < inputLength)
             {
                 inputCharacter = inputByteArray[inputIndex];
+                // Search for opening bracket.
                 if (inputCharacter == openingBracket)
                 {
-                    if (inputCharacter + rangeEndOffset <= inputLength)
+                    // Check if opening bracket belongs to timestamp.
+                    if (inputCharacter + minimumRangeEndOffset <= inputLength)
                     {
-                        if (inputByteArray[inputIndex + closingBracketOffset] == closingBracket &&
-                            inputByteArray[inputIndex + firstColonOffset] == colon &&
+                        // Timestamps can take 2 forms: [##:##:##.##] and [##:##:##.###].
+                        // Check the elements they have in common (::.).
+                        if (inputByteArray[inputIndex + firstColonOffset] == colon &&
                             inputByteArray[inputIndex + secondColonOffset] == colon &&
                             inputByteArray[inputIndex + dotOffset] == dot)
                         {
-                            // All timestamp identifiers match, timestamp located.
-                            foundTimestamp = true;
+                            // Fixed timestamp identifiers match, now check location of the closing bracket.
+                            if (inputByteArray[inputIndex + closingBracketOffset_shortTimestamp] == closingBracket)
+                            {
+                                // Timestamp was format [##:##:##.##].
+                                timestampFormat = timestampFormat.shortTimestamp;
+                                foundTimestamp = true;
+                            }
+                            else if (inputByteArray[inputIndex + closingBracketOffset_longTimestamp] == closingBracket)
+                            {
+                                // Timestamp was format [##:##:##.###].
+                                timestampFormat = timestampFormat.longTimestamp;
+                                foundTimestamp = true;
+                            }
+                            else
+                            {
+                                // No match for closing bracket. Not a timestamp after all, or in an unknown format.
+                                foundTimestamp = false;
+                            }
                         }
                         else
                         {
-                            // Not enough space after opening bracket for this to be a real subtitle.
+                            // Other timestamp identifiers don't match, opening bracket was not part of timestamp.
                             foundTimestamp = false;
                         }
                     }
                     else
                     {
-                        // Opening bracket was not part of timestamp.
+                        // Not enough space after opening bracket for this to be the beginning of a subtitle.
                         foundTimestamp = false;
                     }
                 }
                 if (foundTimestamp)
                 {
-                    timestampRangePositionList.Add(inputIndex + rangeStartOffset);
-                    // Set checkpoint for next timestamp beyond the range of this one and the leading binary data of the next.
-                    inputIndex += rangeEndOffset + 1 - rangeStartOffset;
+                    // The timestamp is preceded by some binary data (rangeStartOffset), so skip over that and add the actual beginning of the timestamp.
+                    // Also add the timestamp format ([##:##:##.##] or [##:##:##.###]), this is important later for parsing.
+                    timestampList.Add(new Timestamp(inputIndex + rangeStartOffset, timestampFormat));
+                    // Set checkpoint for next timestamp beyond the (minimum) range of this one and the leading binary data of the next.
+                    inputIndex += minimumRangeEndOffset + 1 - rangeStartOffset;
                     // Reset found flag.
                     foundTimestamp = false;
                 }
                 else
                 {
+                    // Advance to the next character in the caption data.
                     inputIndex++;
                 }
             }
-            return timestampRangePositionList.ToArray();
+            // Return timestamp locations in the caption file data.
+            return timestampList.ToArray();
         }
 
 
         public class Subtitle
         {
-            private int textStartPosition = 43;
+            // Text portion of the subtitle starts this far from the beginning of the timestamp. Can vary according to timestamp format.
+            private int textStartPosition;
 
+            // Check if all necessary parameters for a valid subtitle have been set.
             public bool isValidSubtitle
             {
                 get
@@ -138,18 +199,21 @@ namespace LyndaDecryptor
                 }
             }
 
+            // Time when the subtitle should appear in the video.
             private string start_timestamp;
             public string Start_timestamp
             {
                 get { return start_timestamp; }
             }
 
+            // Time when the subtitle should disappear.
             private string end_timestamp;
             public string End_timestamp
             {
                 get { return end_timestamp; }
             }
 
+            // The actual text of the subtitle.
             private string subtitleText;
             public string SubtitleText
             {
@@ -157,38 +221,56 @@ namespace LyndaDecryptor
             }
 
             // Initialize subtitle object.
-            public Subtitle(byte[] subtitleData)
+            public Subtitle(byte[] subtitleData, timestampFormat ts_format)
             {
-                extractStartTimestamp(subtitleData);
+                extractStartTimestamp(subtitleData, ts_format);
                 extractText(subtitleData);
             }
 
+            // Unknown at initialization. Will be set later with the start time of the next subtitle object.
             public void setEndTimestamp(string endtime)
             {
                 end_timestamp = endtime;
             }
 
-            private void extractStartTimestamp(byte[] subtitleData)
+            // Extract timestamp from subtitle data.
+            private void extractStartTimestamp(byte[] subtitleData, timestampFormat ts_format)
             {
-                // Timestamp (without brackets) is 11 bytes long and starts at position 17.
-                byte[] timestampByteArray = new byte[11];
-                Array.Copy(subtitleData, 17, timestampByteArray, 0, 11);
+                int timestampLength;
+                if (ts_format == timestampFormat.shortTimestamp)
+                {
+                    // Short timestamp (without brackets) is 11 bytes long.
+                    timestampLength = 11;
+                    textStartPosition = 43;
+                }
+                else
+                {
+                    // Long timestamp (without brackets) is 12 bytes long.
+                    timestampLength = 12;
+                    textStartPosition = 44;
+                }
+                byte[] timestampByteArray = new byte[timestampLength];
+                // Timestamp (without brackets) starts at position 17.
+                Array.Copy(subtitleData, 17, timestampByteArray, 0, timestampLength);
                 string timestampString = bytesToString(timestampByteArray, timestampByteArray.Length);
+                string properFormatTimestamp = convertToShortFormat(timestampString);
                 // Change "." in timestamp to "," which is used in the SRT format.
-                start_timestamp = Regex.Replace(timestampString, "\\.", ",");
+                start_timestamp = Regex.Replace(properFormatTimestamp, "\\.", ",");
             }
 
+            // Extract text from subtitle data.
             private void extractText(byte[] subtitleData)
             {
                 bool hasValidText;
                 byte[] trimmedText = new byte[0];
-                // Text data starts at byte 43.
+
                 if (subtitleData.Length > textStartPosition)
                 {
                     // Subtitle is long enough to contain text following the timestamp.
                     int textLength = subtitleData.Length - textStartPosition;
                     byte[] textPortion = new byte[textLength];
-                    Array.Copy(subtitleData, 43, textPortion, 0, textLength);
+                    Array.Copy(subtitleData, textStartPosition, textPortion, 0, textLength);
+                    // Strip nonprintable characters from beginning and end of text.
                     trimmedText = trimNonprintable(textPortion);
                     if (trimmedText.Length > 0)
                     {
@@ -196,6 +278,7 @@ namespace LyndaDecryptor
                     }
                     else
                     {
+                        // Text consisted of only nonprintable characters.
                         hasValidText = false;
                     }
                 }
@@ -285,11 +368,28 @@ namespace LyndaDecryptor
                     }
                     else
                     {
+                        // Character was not part of linebreak, or character was part of CRLF linebreak.
                         returnText.Add(currentCharacter);
                     }
                     previousCharacter = currentCharacter;
                 }
                 return returnText.ToArray();
+            }
+
+            // Change long timestamp formats to short format for .SRT file. SRT can handle long format too, but maybe not mixed formats. Making everything the same just in case.
+            private string convertToShortFormat(string timestamp)
+            {
+                if (timestamp.Length == 12)
+                {
+                    // Timestamp is long format.
+                    // Return everything but last character.
+                    return timestamp.Substring(0,11);
+                }
+                else
+                {
+                    // Timestamp is already short format.
+                    return timestamp;
+                }
             }
 
             private string bytesToString(byte[] bytes, int length)
@@ -302,48 +402,48 @@ namespace LyndaDecryptor
                 return System.Text.Encoding.UTF8.GetBytes(text);
             }
         }
+        
 
-        public Subtitle[] parseCaptionData(byte[] captionData, int[] subtitlePositions)
+        public Subtitle[] parseCaptionData(byte[] captionData, Timestamp[] timestampDataArray)
         {
             // Extract subtitles from caption file data.
-            int positionCount = subtitlePositions.Length;
+            int timestampCount = timestampDataArray.Length;
             int startPosition;
             int subtitleLength;
             byte[] newSubtitleData;
             Subtitle newSubtitle;
             List<Subtitle> subtitleList = new List<Subtitle>();
-            for (int positionIndex = 0; positionIndex < positionCount; positionIndex++)
+            for (int timestampIndex = 0; timestampIndex < timestampCount; timestampIndex++)
             {
-                startPosition = subtitlePositions[positionIndex];
-                if (positionIndex == positionCount - 1)
+                startPosition = timestampDataArray[timestampIndex].position;
+                if (timestampIndex == timestampCount - 1)
                 {
-                    // The last subtitle extends to the end of the caption data.
+                    // Special case for the last subtitle. It extends to the end of the caption data.
                     subtitleLength = captionData.Length - startPosition;
                 }
                 else
                 {
                     // The subtitle extends up to the beginning of the next one.
-                    subtitleLength = subtitlePositions[positionIndex + 1] - startPosition;
+                    subtitleLength = timestampDataArray[timestampIndex + 1].position - startPosition;
                 }
+
                 newSubtitleData = new byte[subtitleLength];
                 Array.Copy(captionData, startPosition, newSubtitleData, 0, subtitleLength);
 
                 // Create subtitle object, which also handles parsing of the data.
-                newSubtitle = new Subtitle(newSubtitleData);
+                timestampFormat ts_format = timestampDataArray[timestampIndex].type;
+                newSubtitle = new Subtitle(newSubtitleData, ts_format);
                 subtitleList.Add(newSubtitle);
             }
 
             // Set end time of each subtitle to the beginning of the next one.
             int subtitleCount = subtitleList.Count;
-            for (int subtitleIndex = 0; subtitleIndex < subtitleCount; subtitleIndex++)
+            for (int subtitleIndex = 0; subtitleIndex < subtitleCount - 1; subtitleIndex++)
             {
-                if (subtitleIndex < subtitleCount - 1)
-                {
-                    // End timestamp is equal to the start timestamp of the next one. Skip this for the last subtitle because there is no next one. It wouldn't contain text anyway.
-                    Subtitle currentSub = subtitleList[subtitleIndex];
-                    Subtitle nextSub = subtitleList[subtitleIndex + 1];
-                    currentSub.setEndTimestamp(nextSub.Start_timestamp);
-                }
+                // End timestamp is equal to the start timestamp of the next one. Last subtitle is skipped because there is no next one. It wouldn't contain text anyway.
+                Subtitle currentSub = subtitleList[subtitleIndex];
+                Subtitle nextSub = subtitleList[subtitleIndex + 1];
+                currentSub.setEndTimestamp(nextSub.Start_timestamp);
             }
 
             // Discard subtitles that have no text
@@ -368,10 +468,10 @@ namespace LyndaDecryptor
             // NOTES ON THE STRUCTURE OF .CAPTION FILES                                                                                                                   //
             //                                                                                                                                                            //
             // The .caption files start with a header. It is ignored by the conversion function.                                                                          //
-            // Following the header are blocks of subtitle data. These blocks consist of 16 bytes of binary data, followed by a timestamp in the format [##:##:##.##].    //
-            // This is followed by another 14 bytes of binary data, after which the text of the subtitle starts. The text continues until the next block.                 //
-            // Some blocks contain no valid text, and serve as markers for the end time of the previous block. They usually occur once (or several times) at the end of   //
-            // the .caption file, but can sometimes be found following each valid subtitle block.                                                                         //
+            // Following the header are blocks of subtitle data. These blocks consist of 16 bytes of binary data, followed by a timestamp in the format [##:##:##.##], or //
+            // in some cases [##:##:##.###]. This is followed by another 14 or 15 bytes of binary data (depending on timestamp format), after which the text of the       //
+            // subtitle starts. The text continues until the next block. Some blocks contain no valid text, and serve as markers for the end time of the previous block.  //
+            // They usually occur once (or several times) at the end of the .caption file, but can sometimes be found following each valid subtitle block.                //
             // Linebreaks used by .caption files are usually CRLF, but can also be LF. This may be different for each video.                                              //
             // Blocks are most often separated by double, but sometimes single linebreaks (in combination with end-time blocks).                                          //
             ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -392,16 +492,17 @@ namespace LyndaDecryptor
             byte[] subtitleFile = File.ReadAllBytes(filePath);
 
             // Locate start positions of subtitles.
-            int[] subtitlePositions = findTimestamps(subtitleFile);
+            Timestamp[] timestampData = findTimestamps(subtitleFile);
 
             // Extract subtitles from file data.
-            Subtitle[] subtitles = parseCaptionData(subtitleFile, subtitlePositions);
+            Subtitle[] subtitles = parseCaptionData(subtitleFile, timestampData);
 
             // Output data in .srt file.
             this.buildSrt(subtitles, this.outFile);
 
             return true;
         }
+
 
         private bool buildSrt(Subtitle[] subtitleArray, string path)
         {
