@@ -1,11 +1,4 @@
 ﻿using System;
-using System.Data.SQLite;
-using System.IO;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading.Tasks;
-using System.Security.Cryptography;
-using System.Threading;
 
 using static LyndaDecryptor.Utils;
 
@@ -23,19 +16,19 @@ namespace LyndaDecryptor
         static void Main(string[] args)
         {
             Decryptor decryptor;
-            DecryptorOptions decryptorOptions = new DecryptorOptions();
+            var decryptorOptions = new DecryptorOptions();
 
             try
             {
                 decryptorOptions = ParseCommandLineArgs(args);
                 decryptor = new Decryptor(decryptorOptions);
 
-                if(decryptorOptions.UsageMode == Mode.None)
+                if (decryptorOptions.UsageMode == Mode.None)
                 {
                     Usage();
                     goto End;
                 }
-                else if(decryptorOptions.RemoveFilesAfterDecryption)
+                else if (decryptorOptions.RemoveFilesAfterDecryption)
                 {
                     WriteToConsole("[ARGS] Removing files after decryption." + Environment.NewLine, ConsoleColor.Yellow);
                     WriteToConsole("[ARGS] Press any key to continue or CTRL + C to break..." + Environment.NewLine, ConsoleColor.Yellow);
@@ -43,7 +36,7 @@ namespace LyndaDecryptor
                 }
 
                 decryptor.InitDecryptor(ENCRYPTION_KEY);
-                    
+
 
                 if (decryptorOptions.UsageMode == Mode.Folder)
                     decryptor.DecryptAll(decryptorOptions.InputPath, decryptorOptions.OutputFolder);
@@ -55,7 +48,7 @@ namespace LyndaDecryptor
                 WriteToConsole("[START] Error occured: " + e.Message + Environment.NewLine, ConsoleColor.Red);
                 Usage();
             }
-End:
+            End:
             WriteToConsole(Environment.NewLine + "Press any key to exit the program...");
             Console.ReadKey();
         }

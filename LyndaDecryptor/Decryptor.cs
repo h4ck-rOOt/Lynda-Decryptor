@@ -56,7 +56,7 @@ namespace LyndaDecryptor
             Options = options;
 
             if (options.UseDatabase)
-                Options.UseDatabase = InitDB(options.DatabasePath);  
+                Options.UseDatabase = InitDB(options.DatabasePath);
         }
 
         #region Methods
@@ -91,7 +91,7 @@ namespace LyndaDecryptor
             if (string.IsNullOrEmpty(databasePath))
             {
                 // Try to figure out default app db path
-                var AppPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "lynda.com", "video2brain Desktop App");
+                string AppPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "lynda.com", "video2brain Desktop App");
 
                 if (!Directory.Exists(AppPath))
                     AppPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "lynda.com", "lynda.com Desktop App");
@@ -126,28 +126,34 @@ namespace LyndaDecryptor
             if (!Directory.Exists(folderPath))
                 throw new DirectoryNotFoundException();
 
-            if(string.IsNullOrWhiteSpace(outputFolder))
+            if (string.IsNullOrWhiteSpace(outputFolder))
                 outputFolder = Path.Combine(Path.GetDirectoryName(folderPath), "decrypted");
 
             OutputDirectory = Directory.Exists(outputFolder) ? new DirectoryInfo(outputFolder) : Directory.CreateDirectory(outputFolder);
 
-            foreach (string entry in Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories))
+            IEnumerable<string> files = Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories);
+            if (!files.Any())
+            {
+                files = Directory.EnumerateFiles(folderPath, "*.ldcw", SearchOption.AllDirectories);
+            }
+
+            foreach (string entry in files)
             {
                 string newPath = string.Empty;
-                var item = entry;
+                string item = entry;
 
                 if (Options.UseDatabase)
                 {
                     try
                     {
                         // get metadata with courseID and videoID
-                        var videoInfo = GetVideoInfoFromDB(new DirectoryInfo(Path.GetDirectoryName(item)).Name, Path.GetFileName(item).Split('_')[0]);
+                        VideoInfo videoInfo = GetVideoInfoFromDB(new DirectoryInfo(Path.GetDirectoryName(item)).Name, Path.GetFileName(item).Split('_')[0]);
 
-                        if(videoInfo != null)
+                        if (videoInfo != null)
                         {
                             // create new path and folder
-                            var complexTitle = $"E{videoInfo.VideoIndex} - {videoInfo.VideoTitle}.mp4";
-                            var simpleTitle = $"E{videoInfo.VideoIndex}.mp4";
+                            string complexTitle = $"E{videoInfo.VideoIndex} - {videoInfo.VideoTitle}.mp4";
+                            string simpleTitle = $"E{videoInfo.VideoIndex}.mp4";
 
                             newPath = Path.Combine(OutputDirectory.FullName, CleanPath(videoInfo.CourseTitle),
                                                    CleanPath(videoInfo.ChapterTitle), CleanPath(complexTitle));
@@ -168,7 +174,7 @@ namespace LyndaDecryptor
                     }
                 }
 
-                if(String.IsNullOrWhiteSpace(newPath))
+                if (String.IsNullOrWhiteSpace(newPath))
                 {
                     newPath = Path.ChangeExtension(item, ".mp4");
                 }
@@ -177,7 +183,7 @@ namespace LyndaDecryptor
                 TaskList.Add(Task.Run(() =>
                 {
                     Decrypt(item, newPath);
-                    convertSub(item, newPath);
+                    ConvertSub(item, newPath);
                     lock (SemaphoreLock)
                     {
                         Semaphore.Release();
@@ -203,11 +209,11 @@ namespace LyndaDecryptor
                 return;
             }
 
-            FileInfo encryptedFileInfo = new FileInfo(encryptedFilePath);
-            
+            var encryptedFileInfo = new FileInfo(encryptedFilePath);
+
             if (File.Exists(decryptedFilePath))
             {
-                FileInfo decryptedFileInfo = new FileInfo(decryptedFilePath);
+                var decryptedFileInfo = new FileInfo(decryptedFilePath);
 
                 if (decryptedFileInfo.Length == encryptedFileInfo.Length)
                 {
@@ -223,39 +229,83 @@ namespace LyndaDecryptor
 
             byte[] buffer = new byte[0x50000];
 
-            if (encryptedFileInfo.Extension != ".lynda")
+            if (encryptedFileInfo.Extension != ".lynda" &&
+                encryptedFileInfo.Extension != ".ldcw")
             {
                 WriteToConsole("[ERR] Couldn't load file: " + encryptedFilePath, ConsoleColor.Red);
                 return;
             }
 
-            using (FileStream inStream = new FileStream(encryptedFilePath, FileMode.Open))
+            if (encryptedFileInfo.Extension == ".lynda")
             {
-                using (CryptoStream decryptionStream = new CryptoStream(inStream, RijndaelInstace.CreateDecryptor(KeyBytes, KeyBytes), CryptoStreamMode.Read))
-                using (FileStream outStream = new FileStream(decryptedFilePath, FileMode.Create))
+                using (var inStream = new FileStream(encryptedFilePath, FileMode.Open))
                 {
-                    WriteToConsole("[DEC] Decrypting file " + encryptedFileInfo.Name + "...");
-
-                    while ((inStream.Length - inStream.Position) >= buffer.Length)
+                    using (var decryptionStream = new CryptoStream(inStream, RijndaelInstace.CreateDecryptor(KeyBytes, KeyBytes), CryptoStreamMode.Read))
                     {
-                        decryptionStream.Read(buffer, 0, buffer.Length);
-                        outStream.Write(buffer, 0, buffer.Length);
+                        using (var outStream = new FileStream(decryptedFilePath, FileMode.Create))
+                        {
+                            WriteToConsole("[DEC] Decrypting file " + encryptedFileInfo.Name + "...");
+
+                            while ((inStream.Length - inStream.Position) >= buffer.Length)
+                            {
+                                decryptionStream.Read(buffer, 0, buffer.Length);
+                                outStream.Write(buffer, 0, buffer.Length);
+                            }
+
+                            buffer = new byte[inStream.Length - inStream.Position];
+                            decryptionStream.Read(buffer, 0, buffer.Length);
+                            outStream.Write(buffer, 0, buffer.Length);
+                            outStream.Flush();
+                            outStream.Close();
+
+                            WriteToConsole("[DEC] File decryption completed: " + decryptedFilePath, ConsoleColor.DarkGreen);
+                        }
                     }
 
-                    buffer = new byte[inStream.Length - inStream.Position];
-                    decryptionStream.Read(buffer, 0, buffer.Length);
-                    outStream.Write(buffer, 0, buffer.Length);
-                    outStream.Flush();
-                    outStream.Close();
-
-                    WriteToConsole("[DEC] File decryption completed: " + decryptedFilePath, ConsoleColor.DarkGreen);
+                    inStream.Close();
+                    buffer = null;
                 }
+            }
+            else if (encryptedFileInfo.Extension == ".ldcw")
+            {
+                using (var inStream = new FileStream(encryptedFilePath, FileMode.Open))
+                {
+                    using (var outStream = new FileStream(decryptedFilePath, FileMode.Create))
+                    {
+                        WriteToConsole("[DEC] Decrypting file " + encryptedFileInfo.Name + "...");
 
-                inStream.Close();
-                buffer = null;
+                        byte[] array = new byte[63];
+                        int num = inStream.Read(array, 0, 63);
+                        byte[] array2 = new byte[63];
+                        for (int i = 0; i < num; i++)
+                        {
+                            array2[i] = (byte)~array[i];
+                        }
+                        //inStream.Seek(0L, SeekOrigin.Begin);
+                        outStream.Write(array2, 0, array2.Length);
+
+
+                        while ((inStream.Length - inStream.Position) >= buffer.Length)
+                        {
+                            inStream.Read(buffer, 0, buffer.Length);
+                            outStream.Write(buffer, 0, buffer.Length);
+                        }
+
+                        buffer = new byte[inStream.Length - inStream.Position];
+                        inStream.Read(buffer, 0, buffer.Length);
+                        outStream.Write(buffer, 0, buffer.Length);
+                        outStream.Flush();
+                        outStream.Close();
+
+                        WriteToConsole("[DEC] File decryption completed: " + decryptedFilePath, ConsoleColor.DarkGreen);
+                    }
+
+                    inStream.Close();
+                    buffer = null;
+                }
             }
 
-            convertSub(encryptedFilePath, decryptedFilePath);
+            ConvertSub(encryptedFilePath, decryptedFilePath);
 
             if (Options.RemoveFilesAfterDecryption)
                 encryptedFileInfo.Delete();
@@ -275,7 +325,7 @@ namespace LyndaDecryptor
 
             try
             {
-                var cmd = DatabaseConnection.CreateCommand();
+                SQLiteCommand cmd = DatabaseConnection.CreateCommand();
 
                 // Query all required tables and fields from the database
                 cmd.CommandText = @"SELECT Video.ID, Video.ChapterId, Video.CourseId, 
@@ -291,17 +341,18 @@ namespace LyndaDecryptor
                 cmd.Parameters.Add(new SQLiteParameter("@courseId", courseID));
                 cmd.Parameters.Add(new SQLiteParameter("@videoId", videoID));
 
-                var reader = cmd.ExecuteReader();
+                SQLiteDataReader reader = cmd.ExecuteReader();
 
                 if (reader.Read())
                 {
-                    videoInfo = new VideoInfo();
-
-                    videoInfo.CourseTitle = reader.GetString(reader.GetOrdinal("CourseTitle"));
-                    videoInfo.ChapterTitle = reader.GetString(reader.GetOrdinal("ChapterTitle"));
-                    videoInfo.ChapterIndex = reader.GetInt32(reader.GetOrdinal("ChapterIndex"));
-                    videoInfo.VideoIndex = reader.GetInt32(reader.GetOrdinal("SortIndex"));
-                    videoInfo.VideoTitle = reader.GetString(reader.GetOrdinal("Title"));
+                    videoInfo = new VideoInfo
+                    {
+                        CourseTitle = reader.GetString(reader.GetOrdinal("CourseTitle")),
+                        ChapterTitle = reader.GetString(reader.GetOrdinal("ChapterTitle")),
+                        ChapterIndex = reader.GetInt32(reader.GetOrdinal("ChapterIndex")),
+                        VideoIndex = reader.GetInt32(reader.GetOrdinal("SortIndex")),
+                        VideoTitle = reader.GetString(reader.GetOrdinal("Title"))
+                    };
 
                     videoInfo.ChapterTitle = $"{videoInfo.ChapterIndex} - {videoInfo.ChapterTitle}";
 
@@ -325,7 +376,7 @@ namespace LyndaDecryptor
         /// <returns></returns>
         private string CleanPath(string path)
         {
-            foreach (var invalidChar in InvalidPathCharacters)
+            foreach (char invalidChar in InvalidPathCharacters)
                 path = path.Replace(invalidChar, '-');
 
             return path;
@@ -338,21 +389,22 @@ namespace LyndaDecryptor
         /// <param name="videoPath">Initial video path (.lynda file)</param>
         /// <param name="decryptedFilePath">Full decrypted video path</param>
         /// <returns>boolean value, true for succesful conversion</returns>
-        private Boolean convertSub(string videoPath,string decryptedFilePath) {
-            using (MD5 md5 = System.Security.Cryptography.MD5.Create())
+        private Boolean ConvertSub(string videoPath, string decryptedFilePath)
+        {
+            using (var md5 = MD5.Create())
             {
-                var videoId = Path.GetFileName(videoPath).Split('_')[0];
+                string videoId = Path.GetFileName(videoPath).Split('_')[0];
 
                 byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(videoId);
                 byte[] hashBytes = md5.ComputeHash(inputBytes);
 
                 // Convert the byte array to hexadecimal string
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i<hashBytes.Length; i++)
+                var sb = new StringBuilder();
+                for (int i = 0; i < hashBytes.Length; i++)
                 {
                     sb.Append(hashBytes[i].ToString("X2"));
                 }
-                var subFName = sb.ToString() + ".caption";
+                string subFName = sb.ToString() + ".caption";
 
                 string captionFilePath = Path.Combine(Path.GetDirectoryName(videoPath), subFName);
 
@@ -360,7 +412,7 @@ namespace LyndaDecryptor
                 {
                     var csConv = new CaptionToSrt(captionFilePath);
 
-                    var srtFile = Path.Combine(Path.GetDirectoryName(decryptedFilePath), Path.GetFileNameWithoutExtension(decryptedFilePath) + ".srt");
+                    string srtFile = Path.Combine(Path.GetDirectoryName(decryptedFilePath), Path.GetFileNameWithoutExtension(decryptedFilePath) + ".srt");
                     csConv.OutFile = srtFile;
 
                     return csConv.convertToSrt();
