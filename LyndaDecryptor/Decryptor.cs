@@ -183,7 +183,7 @@ namespace LyndaDecryptor
                 TaskList.Add(Task.Run(() =>
                 {
                     Decrypt(item, newPath);
-                    ConvertSub(item, newPath);
+                    ConvertSub(item, newPath, Options.RemoveFilesAfterDecryption);
                     lock (SemaphoreLock)
                     {
                         Semaphore.Release();
@@ -305,7 +305,7 @@ namespace LyndaDecryptor
                 }
             }
 
-            ConvertSub(encryptedFilePath, decryptedFilePath);
+            ConvertSub(encryptedFilePath, decryptedFilePath, Options.RemoveFilesAfterDecryption);
 
             if (Options.RemoveFilesAfterDecryption)
                 encryptedFileInfo.Delete();
@@ -389,13 +389,13 @@ namespace LyndaDecryptor
         /// <param name="videoPath">Initial video path (.lynda file)</param>
         /// <param name="decryptedFilePath">Full decrypted video path</param>
         /// <returns>boolean value, true for succesful conversion</returns>
-        private Boolean ConvertSub(string videoPath, string decryptedFilePath)
+        private Boolean ConvertSub(string videoPath, string decryptedFilePath, bool deleteSourceOnSuccess = false)
         {
             using (var md5 = MD5.Create())
             {
                 string videoId = Path.GetFileName(videoPath).Split('_')[0];
 
-                byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(videoId);
+                byte[] inputBytes = Encoding.ASCII.GetBytes(videoId);
                 byte[] hashBytes = md5.ComputeHash(inputBytes);
 
                 // Convert the byte array to hexadecimal string
@@ -408,6 +408,7 @@ namespace LyndaDecryptor
 
                 string captionFilePath = Path.Combine(Path.GetDirectoryName(videoPath), subFName);
 
+                bool conversionSucceeded = false;
                 if (File.Exists(captionFilePath))
                 {
                     var csConv = new CaptionToSrt(captionFilePath);
@@ -415,12 +416,15 @@ namespace LyndaDecryptor
                     string srtFile = Path.Combine(Path.GetDirectoryName(decryptedFilePath), Path.GetFileNameWithoutExtension(decryptedFilePath) + ".srt");
                     csConv.OutFile = srtFile;
 
-                    return csConv.convertToSrt();
+                    conversionSucceeded = csConv.convertToSrt();
                 }
-                else
+
+                if (conversionSucceeded && deleteSourceOnSuccess)
                 {
-                    return false;
+                    File.Delete(captionFilePath);
                 }
+
+                return conversionSucceeded;
             }
         }
 
