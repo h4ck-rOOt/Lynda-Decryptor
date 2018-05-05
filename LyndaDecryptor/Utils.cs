@@ -31,7 +31,7 @@ namespace LyndaDecryptor
 
         public static DecryptorOptions ParseCommandLineArgs(string[] args)
         {
-            DecryptorOptions options = new DecryptorOptions();
+            var options = new DecryptorOptions();
             int index = 0;
             int length = args.Length;
 
@@ -46,7 +46,7 @@ namespace LyndaDecryptor
                 switch (arg.ToUpper())
                 {
                     case "/D": // Directory Mode
-                        if (length-1 > index && Directory.Exists(args[index + 1]))
+                        if (length - 1 > index && Directory.Exists(args[index + 1]))
                         {
                             options.InputPath = args[index + 1];
                             options.UsageMode = Mode.Folder;
@@ -60,7 +60,7 @@ namespace LyndaDecryptor
                         break;
 
                     case "/F": // File Mode
-                        if (length-1 > index && File.Exists(args[index + 1]))
+                        if (length - 1 > index && File.Exists(args[index + 1]))
                         {
                             options.InputPath = args[index + 1];
 
