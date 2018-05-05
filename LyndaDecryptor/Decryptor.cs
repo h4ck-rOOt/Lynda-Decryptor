@@ -131,11 +131,8 @@ namespace LyndaDecryptor
 
             OutputDirectory = Directory.Exists(outputFolder) ? new DirectoryInfo(outputFolder) : Directory.CreateDirectory(outputFolder);
 
-            IEnumerable<string> files = Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories);
-            if (!files.Any())
-            {
-                files = Directory.EnumerateFiles(folderPath, "*.ldcw", SearchOption.AllDirectories);
-            }
+            IEnumerable<string> files = Directory.EnumerateFiles(folderPath, "*.lynda", SearchOption.AllDirectories)
+                                .Concat(Directory.EnumerateFiles(folderPath, "*.ldcw", SearchOption.AllDirectories));
 
             foreach (string entry in files)
             {
@@ -277,13 +274,13 @@ namespace LyndaDecryptor
                         byte[] array = new byte[63];
                         int num = inStream.Read(array, 0, 63);
                         byte[] array2 = new byte[63];
+
                         for (int i = 0; i < num; i++)
                         {
                             array2[i] = (byte)~array[i];
                         }
-                        //inStream.Seek(0L, SeekOrigin.Begin);
-                        outStream.Write(array2, 0, array2.Length);
 
+                        outStream.Write(array2, 0, array2.Length);
 
                         while ((inStream.Length - inStream.Position) >= buffer.Length)
                         {
