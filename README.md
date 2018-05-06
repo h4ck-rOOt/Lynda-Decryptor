@@ -16,6 +16,8 @@ There are some flags you can use to control the behavior:
 
 Converting subtitles is possible (thanks to @mdomnita) with this little tool [Repo](https://github.com/mdomnita/LyndaCaptionToSrtConvertor)
 
+LDCW Support provided by @DmitriySokhach (thanks for your work)
+
 ---
 
 ## Limitations
