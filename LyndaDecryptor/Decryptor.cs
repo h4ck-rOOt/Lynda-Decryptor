@@ -40,10 +40,10 @@ namespace LyndaDecryptor
         public Decryptor()
         {
             InvalidPathCharacters.AddRange(Path.GetInvalidPathChars());
-            InvalidPathCharacters.AddRange(new char[] { ':', '?', '"', '\\', '/' });
+            InvalidPathCharacters.AddRange(new char[] { ':', '?', '"', '\\', '/' , '*'});
 
             InvalidFileCharacters.AddRange(Path.GetInvalidFileNameChars());
-            InvalidFileCharacters.AddRange(new char[] { ':', '?', '"', '\\', '/' });
+            InvalidFileCharacters.AddRange(new char[] { ':', '?', '"', '\\', '/', '*' });
         }
 
         /// <summary>
